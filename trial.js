@@ -2,15 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 /* ------------------------------------------------------------------
-   BUILDING FOOTPRINT (U-shape, opening toward +Z / the camera)
-
-        -8                                        +8
-   -6.5  +----------------------------------------+
-         |            BACK CORRIDOR BAR           |
-   -3.5  +--------+                      +--------+
-         |  LEFT  |                      | RIGHT  |
-         |  WING  |      COURTYARD       | WING   |
-    +7   +--------+                      +--------+
+   BUILDING FOOTPRINT (U-shape with triangular bevels)
 ------------------------------------------------------------------- */
 const B = {
   outerLeft:  -11,
@@ -19,27 +11,42 @@ const B = {
   backInner:  -3.5,   // where the courtyard starts
   wingInnerL: -4.5,   // inner face of the left wing
   wingInnerR:  4.5,   // inner face of the right wing
-  frontEdge:   7      // where both wings end
+  frontEdge:   7        // where both wings end
 };
 
 // Corridor: a wide walkway running in front of every room, tracing the U
 const PATH_W = 1.8;
 const PATH_Y = 0.17;              // just above the slab top (0.15)
 
-// Room slot positions derived from the footprint above
-const BACK_SLOT_X = [-9.1, -6.5, -3.9, -1.3, 1.3];
-const BACK_SLOT_Z = -6.3;
+// Room slot positions adjusted to avoid the 3-unit corner bevels (flat run is x -8..8)
+// and to leave clearance for the staircase.
+// Every floor plan has 8 back-corridor rooms: 6 sit flat along the back wall,
+// and 2 are angled 45° to sit flush in the triangular bevel nooks at each end.
+const BACK_SLOT_Z = -6.2;
+const CORNER_Z = -5.29;              // inset from the diagonal wall by half its depth
+const CORNER_W = 2.2, CORNER_D = 2.0; // corner rooms, angled to match the bevel
+const BACK_W = 1.6, BACK_D = 2.0;     // flat rooms along the straight back wall
+
+const BACK_SLOTS = [
+  { x: -8.79, z: CORNER_Z,     rot:  Math.PI / 4, w: CORNER_W, d: CORNER_D }, // left bevel nook
+  { x: -6.20, z: BACK_SLOT_Z,  rot:  0,           w: BACK_W,   d: BACK_D },
+  { x: -4.34, z: BACK_SLOT_Z,  rot:  0,           w: BACK_W,   d: BACK_D },
+  { x: -2.48, z: BACK_SLOT_Z,  rot:  0,           w: BACK_W,   d: BACK_D },
+  { x: -0.62, z: BACK_SLOT_Z,  rot:  0,           w: BACK_W,   d: BACK_D },
+  { x:  1.24, z: BACK_SLOT_Z,  rot:  0,           w: BACK_W,   d: BACK_D },
+  { x:  3.10, z: BACK_SLOT_Z,  rot:  0,           w: BACK_W,   d: BACK_D },
+  { x:  8.79, z: CORNER_Z,     rot: -Math.PI / 4, w: CORNER_W, d: CORNER_D }  // right bevel nook
+];
 const WING_SLOTS = [
   { x: -8.6, z: -1.0 }, { x: -8.6, z: 4.15 },   // left wing, front then back
   { x:  8.6, z: -1.0 }, { x:  8.6, z: 4.15 }    // right wing, front then back
 ];
 const WING_W = 5.0, WING_D = 4.0;   // w runs along the wing, d across it
-const BACK_W = 2.4, BACK_D = 2.0;
 
 // QR Code Checkpoint Registry
 const checkpoints = {
   'L1_ENTRANCE': { name: 'Layer 1 Main Lobby',      layer: 1, targetId: 'l1_lobby' },
-  'CAFETERIA':   { name: 'Ground Floor Cafeteria',  layer: 1, targetId: 'l1_wing_left_a' },
+  'CAFETERIA':   { name: 'Ground Floor Cafeteria',  layer: 1, targetId: 'l1_cafeteria_annex' },
   'LIBRARY':     { name: 'Library Lower Floor',     layer: 2, targetId: 'l2_library' },
   'STUDENT_L3':  { name: 'Student Lounge (Floor 3)', layer: 3, targetId: 'l3_wing_right_a' }
 };
@@ -48,8 +55,8 @@ const checkpoints = {
 const floorPlans = {
   1: {
     wings: [
-      { id: 'l1_wing_left_a',  name: 'Cafeteria - Front Hall', desc: 'Serving counters and grab-and-go shelves.', hours: '7:00 AM - 5:00 PM', status: 'Open' },
-      { id: 'l1_wing_left_b',  name: 'Cafeteria - Dining Area', desc: 'Long-table seating that opens onto the courtyard.', hours: '7:00 AM - 5:00 PM', status: 'Open' },
+      { id: 'l1_wing_left_a',  name: 'Faculty Room A', desc: 'Faculty desks and consultation space near the lobby.', hours: '8:00 AM - 5:00 PM', status: 'Open' },
+      { id: 'l1_wing_left_b',  name: 'Faculty Room B', desc: 'Additional faculty desks opening onto the courtyard.', hours: '8:00 AM - 5:00 PM', status: 'Open' },
       { id: 'l1_wing_right_a', name: 'Campus Bookstore', desc: 'Textbooks, uniforms, and school supplies.', hours: '8:00 AM - 4:30 PM', status: 'Open' },
       { id: 'l1_wing_right_b', name: 'Campus Annex', desc: 'Overflow retail and parcel pickup.', hours: '8:00 AM - 4:30 PM', status: 'Open' }
     ],
@@ -61,7 +68,7 @@ const floorPlans = {
       { id: 'l1_canteen2',    name: 'Annex Food Kiosks', desc: 'Small food stalls and drink counters.', hours: '8:00 AM - 6:00 PM', status: 'Open' },
       { id: 'l1_maintenance', name: 'Facilities & Maintenance', desc: 'Building services and lost and found.', hours: '7:00 AM - 5:00 PM', status: 'Open' },
       { id: 'l1_guidance',    name: 'Guidance Office', desc: 'Counseling and student support services.', hours: '8:00 AM - 5:00 PM', status: 'Open' },
-      { id: 'l1_restroom_m',  name: 'Restroom (Men)', desc: 'Located at the end of the corridor.', hours: 'Always Open', status: 'Open' }
+      { id: 'l1_cafeteria_annex', name: 'Cafeteria - Annex Seating', desc: 'Extra seating and vending machines near the lobby.', hours: '7:00 AM - 5:00 PM', status: 'Open' }
     ]
   },
   2: {
@@ -78,8 +85,7 @@ const floorPlans = {
       { id: 'l2_facultypool',  name: 'Faculty Center A', desc: 'Faculty desks and consultation corners.', hours: '8:00 AM - 5:00 PM', status: 'Open' },
       { id: 'l2_discussion1',  name: 'Discussion Pod 1', desc: 'Small group room, whiteboard included.', hours: '8:00 AM - 6:00 PM', status: 'Open' },
       { id: 'l2_restroom_f',   name: 'Restroom (Women)', desc: 'Located at the end of the corridor.', hours: 'Always Open', status: 'Open' },
-      { id: 'l2_room105',      name: 'Lecture Hall 105', desc: 'Standard classroom.', hours: '7:00 AM - 7:00 PM', status: 'Open' },
-      { id: 'l2_restroom_m',   name: 'Restroom (Men)', desc: 'Located at the end of the corridor.', hours: 'Always Open', status: 'Open' }
+      { id: 'l2_room105',      name: 'Lecture Hall 105', desc: 'Standard classroom.', hours: '7:00 AM - 7:00 PM', status: 'Open' }
     ]
   },
   3: {
@@ -96,8 +102,7 @@ const floorPlans = {
       { id: 'l3_facultyb',    name: 'IT Department Faculty Room', desc: 'IT faculty offices.', hours: '8:00 AM - 5:00 PM', status: 'Open' },
       { id: 'l3_discussion2', name: 'Collaborative Pod 2', desc: 'Group work room with a shared display.', hours: '8:00 AM - 6:00 PM', status: 'Open' },
       { id: 'l3_restroom_f',  name: 'Restroom (Women)', desc: 'Located at the end of the corridor.', hours: 'Always Open', status: 'Open' },
-      { id: 'l3_comlab3',     name: 'Computer Laboratory 3', desc: 'Overflow lab for programming classes.', hours: '8:00 AM - 6:00 PM', status: 'Open' },
-      { id: 'l3_restroom_m',  name: 'Restroom (Men)', desc: 'Located at the end of the corridor.', hours: 'Always Open', status: 'Open' }
+      { id: 'l3_comlab3',     name: 'Computer Laboratory 3', desc: 'Overflow lab for programming classes.', hours: '8:00 AM - 6:00 PM', status: 'Open' }
     ]
   },
   4: {
@@ -114,8 +119,7 @@ const floorPlans = {
       { id: 'l4_storage',       name: 'Event Equipment Storage', desc: 'Sound, lighting, and staging equipment.', hours: 'Restricted', status: 'Staff Only' },
       { id: 'l4_rooftopgarden', name: 'Rooftop Green Deck', desc: 'Planted deck open to the sky.', hours: '8:00 AM - 4:30 PM', status: 'Open' },
       { id: 'l4_restroom_f',    name: 'Restroom (Women)', desc: 'Located at the end of the corridor.', hours: 'Always Open', status: 'Open' },
-      { id: 'l4_altroom',       name: 'Alumni Relations Office', desc: 'Alumni affairs and events planning.', hours: '8:00 AM - 5:00 PM', status: 'Open' },
-      { id: 'l4_restroom_m',    name: 'Restroom (Men)', desc: 'Located at the end of the corridor.', hours: 'Always Open', status: 'Open' }
+      { id: 'l4_altroom',       name: 'Alumni Relations Office', desc: 'Alumni affairs and events planning.', hours: '8:00 AM - 5:00 PM', status: 'Open' }
     ]
   }
 };
@@ -131,7 +135,8 @@ Object.keys(floorPlans).forEach(key => {
     poiData3D.push({ ...room, layer, x: WING_SLOTS[i].x, z: WING_SLOTS[i].z, w: WING_W, d: WING_D, color: ROOM_COLOR });
   });
   plan.corridor.forEach((room, i) => {
-    poiData3D.push({ ...room, layer, x: BACK_SLOT_X[i], z: BACK_SLOT_Z, w: BACK_W, d: BACK_D, color: ROOM_COLOR });
+    const slot = BACK_SLOTS[i];
+    poiData3D.push({ ...room, layer, x: slot.x, z: slot.z, w: slot.w, d: slot.d, rot: slot.rot, color: ROOM_COLOR });
   });
 });
 
@@ -164,6 +169,7 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 renderer.domElement.style.touchAction = 'none';
+renderer.domElement.style.cursor = 'grab';
 document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -222,13 +228,16 @@ walkway.position.set(0, 0.01, B.backInner + courtD / 2);
 walkway.receiveShadow = true;
 scene.add(walkway);
 
-/* U-shaped slab geometry.
-   The shape is drawn in (x, y) where y stands in for world Z, then rotated flat.
-   `m` expands the outline outward — the courtyard notch shrinks by the same amount. */
+/* U-shaped slab geometry with triangular bevels on both back corners. */
 function makeUShape(m = 0) {
   const s = new THREE.Shape();
-  s.moveTo(B.outerLeft  - m, B.backOuter - m);
-  s.lineTo(B.outerRight + m, B.backOuter - m);
+  
+  s.moveTo(B.outerLeft  - m,     B.backOuter - m + 3.0); 
+  s.lineTo(B.outerLeft  - m + 3.0, B.backOuter - m); 
+
+  s.lineTo(B.outerRight + m - 3.0, B.backOuter - m); 
+  s.lineTo(B.outerRight + m,     B.backOuter - m + 3.0); 
+
   s.lineTo(B.outerRight + m, B.frontEdge + m);
   s.lineTo(B.wingInnerR - m, B.frontEdge + m);
   s.lineTo(B.wingInnerR - m, B.backInner + m);
@@ -246,9 +255,7 @@ function makeSlabGeometry(margin, thickness, topY) {
   return geo;
 }
 
-/* Corridor geometry, identical on every floor.
-   Back run sits between the back rooms and the courtyard; each wing run
-   sits between that wing's rooms and the courtyard. Together they trace a U. */
+/* Corridor geometry */
 const pathMat = new THREE.MeshStandardMaterial({ color: 0xb9c2cc, roughness: 0.75 });
 
 const backPathZ = B.backInner - PATH_W / 2;                 // centre of the back run
@@ -284,13 +291,34 @@ const layerDisplay = document.getElementById('layer-display');
 const overlay = document.getElementById('instructions-overlay');
 const locationDisplay = document.getElementById('location-display');
 
+/* Reusable staircase builder: a row of steps rising along local +z */
+function makeStaircase(stepCount, stepDepth, riseStep = 0.38) {
+  const stairGroup = new THREE.Group();
+  for (let s = 0; s < stepCount; s++) {
+    const step = new THREE.Mesh(
+      new THREE.BoxGeometry(PATH_W * 0.8, 0.2, stepDepth),
+      new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.6 })
+    );
+    step.position.set(0, s * riseStep + 0.1, s * stepDepth);
+    step.castShadow = true;
+    step.receiveShadow = true;
+    stairGroup.add(step);
+  }
+  return stairGroup;
+}
+
+// The notch between the two left-wing rooms (Faculty Room A / B slots), used to
+// place a second staircase there on every floor.
+const LEFT_WING_GAP_START = WING_SLOTS[0].z + WING_D / 2;
+const LEFT_WING_GAP_Z = LEFT_WING_GAP_START + 0.15;
+
 // Build Floors
 for (let i = 1; i <= 4; i++) {
   const floorGroup = new THREE.Group();
   const floorY = (i - 1) * spacing;
   floorGroup.position.y = floorY;
 
-  // Main U slab: top face sits at y = 0.15 so rooms rest on it
+  // Main U slab
   const slabMesh = new THREE.Mesh(
     makeSlabGeometry(0, 0.3, 0.15),
     new THREE.MeshStandardMaterial({ color: 0xdde3ea, roughness: 0.5, side: THREE.DoubleSide })
@@ -300,7 +328,7 @@ for (let i = 1; i <= 4; i++) {
   floorGroup.add(slabMesh);
   selectableSlabs.push(slabMesh);
 
-  // Balcony lip, same U outline nudged outward and tucked under the slab
+  // Balcony lip
   const balconyMesh = new THREE.Mesh(
     makeSlabGeometry(0.25, 0.12, -0.15),
     new THREE.MeshStandardMaterial({ color: 0xc4cbd4, roughness: 0.4, side: THREE.DoubleSide })
@@ -308,78 +336,78 @@ for (let i = 1; i <= 4; i++) {
   balconyMesh.receiveShadow = true;
   floorGroup.add(balconyMesh);
 
-  // Corridor path: back run plus one run down each wing
+  // Corridor path
   buildFloorPath().forEach(seg => floorGroup.add(seg));
 
-  // Staircase sits on the right-wing corridor, at the open end
+  // Staircase sits on the right side of the back corridor
   if (i < 4) {
-    const stairGroup = new THREE.Group();
-    // Moved from the wing edge to the newly cleared right side of the back corridor
-    stairGroup.position.set(6.7, 1.15, BACK_SLOT_Z);
-    
-    // Rotate the stairs so they face nicely along the corridor if needed
-    stairGroup.rotation.y = Math.PI / 2;
-
-    for (let s = 0; s < 5; s++) {
-      const step = new THREE.Mesh(
-        new THREE.BoxGeometry(PATH_W * 0.8, 0.2, 0.6),
-        new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.6 })
-      );
-      step.position.set(0, s * 0.38 + 0.1, s * 0.6);
-      step.castShadow = true;
-      step.receiveShadow = true;
-      stairGroup.add(step);
-    }
-    floorGroup.add(stairGroup);
+    const backStair = makeStaircase(5, 0.6);
+    backStair.position.set(6.2, 1, BACK_SLOT_Z);
+    backStair.rotation.y = Math.PI / 2;
+    floorGroup.add(backStair);
   }
 
-  // Rooms
-// List of room IDs you want to highlight
-const highlightedIds = [
-  'l1_wing_left_a', 'l1_wing_left_b', // Cafeteria
-  'l2_library', 'l3_libupper',        // Library
-  'l3_wing_right_a', 'l3_wing_right_b', 'l4_lounge' // Student Lounges
-];
+  // Second staircase, tucked in the notch between Faculty Room A and Faculty
+  // Room B (the left-wing rooms), sitting right in the walking path, present
+  // on every layer.
+  if (i < 4) {
+    const wingStair = makeStaircase(5, 0.6);
+    wingStair.position.set(-wingPathX, 1, LEFT_WING_GAP_Z);
+    floorGroup.add(wingStair);
+  }
 
-// Inside your floor/room creation loop:
-poiData3D.filter(p => p.layer === i).forEach(poi => {
-  const isTargetRoom = (poi.id === currentSpot.targetId);
-  const isHighlighted = highlightedIds.includes(poi.id);
+  // List of room IDs you want to highlight
+  const highlightedIds = [
+    'l1_cafeteria_annex',               // Cafeteria
+    'l2_library', 'l3_libupper',        // Library
+    'l3_wing_right_a', 'l3_wing_right_b', 'l4_lounge' // Student Lounges
+  ];
 
-  const roomGroup = new THREE.Group();
-  roomGroup.position.set(poi.x, 0.75, poi.z);
+  // Rooms loop for current floor
+  poiData3D.filter(p => p.layer === i).forEach(poi => {
+    const isTargetRoom = (poi.id === currentSpot.targetId);
+    const isHighlighted = highlightedIds.includes(poi.id);
 
-  // Wing rooms turn to face the courtyard
-  if (poi.x < 0 && poi.z > B.backInner) roomGroup.rotation.y = Math.PI / 2;
-  else if (poi.x > 0 && poi.z > B.backInner) roomGroup.rotation.y = -Math.PI / 2;
+    const roomGroup = new THREE.Group();
+    roomGroup.position.set(poi.x, 0.75, poi.z);
 
-  const roomMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(poi.w, 1.2, poi.d),
-    new THREE.MeshStandardMaterial({
-      color: isTargetRoom ? 0xff4081 : (isHighlighted ? 0xffd700 : poi.color), // Gold color for highlights
-      roughness: 0.7,
-      emissive: isTargetRoom ? 0xff80ab : (isHighlighted ? 0xffa500 : 0x000000), // Soft orange glow
-      emissiveIntensity: isTargetRoom ? 0.5 : (isHighlighted ? 0.6 : 0)
-    })
-  );
-  roomMesh.castShadow = true;
-  roomMesh.receiveShadow = true;
-  roomGroup.add(roomMesh);
+    // Wing rooms face the courtyard; back-corridor rooms use their assigned angle
+    // (0 for the flat run, ±45° for the two rooms angled into the bevel nooks)
+    if (poi.rot !== undefined) {
+      roomGroup.rotation.y = poi.rot;
+    } else if (poi.x < 0 && poi.z > B.backInner) {
+      roomGroup.rotation.y = Math.PI / 2;
+    } else if (poi.x > 0 && poi.z > B.backInner) {
+      roomGroup.rotation.y = -Math.PI / 2;
+    }
 
-  // Glazing on the courtyard-facing side
-  const glassMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(poi.w * 0.8, 0.6, 0.1),
-    new THREE.MeshStandardMaterial({ color: 0x88ccff, roughness: 0.1, transparent: true, opacity: 0.5 })
-  );
-  glassMesh.position.set(0, 0, poi.d / 2 + 0.02);
-  roomGroup.add(glassMesh);
+    const roomMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(poi.w, 1.2, poi.d),
+      new THREE.MeshStandardMaterial({
+        color: isTargetRoom ? 0xff4081 : (isHighlighted ? 0xffd700 : poi.color),
+        roughness: 0.7,
+        emissive: isTargetRoom ? 0xff80ab : (isHighlighted ? 0xffa500 : 0x000000),
+        emissiveIntensity: isTargetRoom ? 0.5 : (isHighlighted ? 0.6 : 0)
+      })
+    );
+    roomMesh.castShadow = true;
+    roomMesh.receiveShadow = true;
+    roomGroup.add(roomMesh);
 
-  roomGroup.userData = { type: 'room', layerNumber: i, data: poi, floorY: floorY };
-  if (isTargetRoom || isHighlighted) roomGroup.scale.set(1.05, 1.2, 1.05);
+    // Glazing on the courtyard-facing side
+    const glassMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(poi.w * 0.8, 0.6, 0.1),
+      new THREE.MeshStandardMaterial({ color: 0x88ccff, roughness: 0.1, transparent: true, opacity: 0.5 })
+    );
+    glassMesh.position.set(0, 0, poi.d / 2 + 0.02);
+    roomGroup.add(glassMesh);
 
-  floorGroup.add(roomGroup);
-  selectableRooms.push(roomGroup);
-})  ;
+    roomGroup.userData = { type: 'room', layerNumber: i, data: poi, floorY: floorY };
+    if (isTargetRoom || isHighlighted) roomGroup.scale.set(1.05, 1.2, 1.05);
+
+    floorGroup.add(roomGroup);
+    selectableRooms.push(roomGroup);
+  });
 
   floorGroup.visible = true;
   floorMeshes[i] = floorGroup;
@@ -415,7 +443,7 @@ if (closeBtn) {
   });
 }
 
-// Tap vs drag detection so orbiting never selects a room
+// Tap vs drag detection
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let pointerStart = null;
@@ -464,7 +492,10 @@ function showRoomDetails(room) {
   if (rlt) rlt.innerText = `Floor Layer ${room.layer}`;
   if (rd) rd.innerText = room.desc;
   if (rh) rh.innerText = room.hours;
-  if (rs) rs.innerText = room.status;
+  if (rs) {
+    rs.innerText = room.status;
+    rs.style.color = (room.status === 'Open') ? '#0B3B24' : '#B04A2F';
+  }
 
   if (infoPanel) infoPanel.classList.add('active');
 }
@@ -490,7 +521,6 @@ function isolateAndZoomFloor(selectedLayer, floorY) {
     targetCamPos.copy(wideCamPos);
     targetLookAt.copy(wideTarget);
   } else {
-    // Look into the open side of the U
     targetLookAt.set(0, floorY + 0.5, 0.5);
     targetCamPos.set(0, floorY + 14, 20);
   }
